@@ -1,5 +1,15 @@
+#[macro_use]
+extern crate impl_ops;
 mod assoc_vec;
+mod constraint;
+mod expression;
+mod solver;
+mod strength;
+mod symbol;
+mod symbolics;
+mod term;
 mod util;
+mod variable;
 
 #[cfg(test)]
 mod tests {
