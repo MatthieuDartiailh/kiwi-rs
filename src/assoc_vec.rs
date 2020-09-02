@@ -1,5 +1,10 @@
 //! Mapping type based on a vec providing fast iteration
+use std::iter::FromIterator;
 use std::mem;
+use std::vec;
+
+// FIXME implement an entry interface similar to HashMap
+// FIXME implement drain
 
 /// Mapping type relying the ability to sort the keys.
 ///
@@ -112,6 +117,11 @@ where
         self.vec.iter()
     }
 
+    /// Iter over the key, value pairs
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<(K, V)> {
+        self.vec.iter_mut()
+    }
+
     /// Search for a key
     ///
     /// If found returns its index ortherwise the index at which to insert it
@@ -122,6 +132,53 @@ where
     }
 }
 
+impl<K, V> Default for AssocVec<K, V>
+where
+    K: Ord,
+{
+    /// Create a new empty AssocVector
+    fn default() -> Self {
+        AssocVec::new()
+    }
+}
+
+impl<K, V> IntoIterator for AssocVec<K, V>
+where
+    K: Ord,
+{
+    type Item = (K, V);
+    type IntoIter = vec::IntoIter<Self::Item>;
+    /// Create a new empty AssocVector
+    fn into_iter(self) -> Self::IntoIter {
+        self.vec.into_iter()
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for AssocVec<K, V>
+where
+    K: Ord,
+{
+    /// Create a new empty AssocVector
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        let mut v = Vec::from_iter(iter);
+        v.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        AssocVec { vec: v }
+    }
+}
+
+impl<K, V> Clone for AssocVec<K, V>
+where
+    K: Ord + Clone,
+    V: Clone,
+{
+    fn clone(&self) -> Self {
+        AssocVec {
+            vec: self.vec.clone(),
+        }
+    }
+}
+
+// XXX add test for traits: Default, IntoIterator, FromIterator
 #[cfg(test)]
 mod test {
 
