@@ -3,6 +3,7 @@ extern crate impl_ops;
 mod assoc_vec;
 mod constraint;
 mod expression;
+mod row;
 mod solver;
 mod strength;
 mod symbol;
