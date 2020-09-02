@@ -3,7 +3,7 @@
 
 use std::cmp;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Type {
     Invalid,
     External,
@@ -12,7 +12,7 @@ pub enum Type {
     Dummy,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Symbol {
     m_id: u64,
     m_type: Type,
