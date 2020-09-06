@@ -9,6 +9,7 @@ use std::cell::Ref;
 use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashMap;
+use std::fmt;
 use std::rc::Rc;
 
 ///
@@ -22,6 +23,9 @@ pub enum RelationalOperator {
 ///
 fn reduce(expr: Expression) -> Expression {
     // FIXME use a cheaper hash algorithm than the default
+    // A custom hasher simply inspecting the pointer of the VariableData should be
+    // quite efficient
+    // Using an AssocVec would also work
     let mut map = HashMap::new();
     for t in expr.terms().iter() {
         *map.entry(t.variable()).or_insert(0.0) += t.coefficient()
@@ -116,6 +120,21 @@ impl cmp::Ord for Constraint {
 impl cmp::PartialOrd for Constraint {
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl fmt::Display for Constraint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{} {} | strength = {}",
+            self.expression(),
+            match *self.op() {
+                RelationalOperator::Equal => "== 0",
+                RelationalOperator::GreaterEqual => ">= 0",
+                RelationalOperator::LessEqual => "<= 0",
+            },
+            self.strength(),
+        ))
     }
 }
 

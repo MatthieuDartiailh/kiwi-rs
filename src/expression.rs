@@ -2,6 +2,7 @@
 //!
 
 use super::term::Term;
+use std::fmt;
 
 ///
 #[derive(Debug, Clone)]
@@ -41,6 +42,18 @@ impl Expression {
             value += t.value();
         }
         value
+    }
+}
+
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{} + {}",
+            self.m_terms
+                .iter()
+                .fold(String::new(), |acc, term| acc + format!("{}", term)),
+            self.m_constant
+        ))
     }
 }
 

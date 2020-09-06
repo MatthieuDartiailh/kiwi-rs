@@ -2,6 +2,7 @@
 //!
 
 use super::variable::Variable;
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct Term {
@@ -31,6 +32,16 @@ impl Term {
     ///
     pub fn value(&self) -> f64 {
         self.m_coefficient * *self.m_variable.value()
+    }
+}
+
+impl fmt::Display for Term {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "{} * {}",
+            self.m_coefficient,
+            self.m_variable.name()
+        ))
     }
 }
 
