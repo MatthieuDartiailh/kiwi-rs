@@ -13,7 +13,7 @@ use std::fmt;
 use std::rc::Rc;
 
 ///
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelationalOperator {
     LessEqual,
     Equal,
