@@ -22,7 +22,7 @@ pub enum ErrorType {
 ///
 ///
 #[derive(Debug)]
-struct KiwiError {
+pub struct KiwiError {
     err_type: ErrorType,
 }
 
