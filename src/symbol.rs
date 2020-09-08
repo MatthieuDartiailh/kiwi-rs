@@ -3,8 +3,10 @@
 
 use std::cmp;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Type {
+// XXX swap type for kind to avoid having to escape type everywhere
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolType {
     Invalid,
     External,
     Slack,
@@ -15,12 +17,12 @@ pub enum Type {
 #[derive(Debug, Clone)]
 pub struct Symbol {
     m_id: u64,
-    m_type: Type,
+    m_type: SymbolType,
 }
 
 impl Symbol {
     ///
-    pub fn new(id: u64, t: Type) -> Symbol {
+    pub fn new(t: SymbolType, id: u64) -> Symbol {
         Symbol {
             m_id: id,
             m_type: t,
@@ -33,7 +35,7 @@ impl Symbol {
     }
 
     ///
-    pub fn r#type(&self) -> &Type {
+    pub fn r#type(&self) -> &SymbolType {
         &self.m_type
     }
 }
