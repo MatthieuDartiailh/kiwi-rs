@@ -8,7 +8,7 @@ use crate::errors::{ErrorType, KiwiError};
 use crate::expression::Expression;
 use crate::row::Row;
 use crate::strength;
-use crate::symbol::{Symbol, SymbolType};
+use crate::symbol::{Symbol, SymbolKind};
 use crate::term::Term;
 use crate::util::near_zero;
 use crate::variable::Variable;
@@ -26,15 +26,6 @@ struct EditInfo {
     constraint: Constraint,
     constant: f64,
 }
-
-// XXX Probably not the best way to approach this use case
-// Using a function taking a closure as illustrated in
-// https://users.rust-lang.org/t/how-to-do-raii-pattern-with-rust/36881/10
-// may be cleaner (it is also less likely to cause borrow checker issue I think
-// at least)
-// struct DualOptimizeGuard {
-//     solver: &mut Solver,
-// }
 
 struct Solver {
     m_cns: AssocVec<Constraint, Tag>,
@@ -87,7 +78,7 @@ impl Solver {
         // this represents redundant constraints and the new dummy
         // marker can enter the basis. If the constant is non-zero,
         // then it represents an unsatisfiable constraint.
-        if *subject.r#type() == SymbolType::Invalid && self.all_dummies(&row) {
+        if subject.kind() == SymbolKind::Invalid && self.all_dummies(&row) {
             if !near_zero(*row.constant()) {
                 return Err(KiwiError {
                     err_type: ErrorType::UnsatisfiableConstraint { constraint },
@@ -100,15 +91,15 @@ impl Solver {
         // If an entering symbol still isn't found, then the row must
         // be added using an artificial variable. If that fails, then
         // the row represents an unsatisfiable constraint.
-        if *subject.r#type() == SymbolType::Invalid {
+        if subject.kind() == SymbolKind::Invalid {
             if !self.add_with_artificial_variable(&row) {
                 return Err(KiwiError {
                     err_type: ErrorType::UnsatisfiableConstraint { constraint },
                 });
             }
         } else {
-            row.solve_for(subject);
-            self.substitute(subject, &row);
+            row.solve_for(&subject);
+            self.substitute(&subject, &row);
             self.m_rows.insert(subject.clone(), row);
         }
 
@@ -259,66 +250,63 @@ impl Solver {
         The given edit variable has not been added to the solver.
 
     */
-    // void suggestValue( const Variable& variable, double value )
-    // {
-    // 	EditMap::iterator it = m_edits.find( variable );
-    // 	if( it == m_edits.end() )
-    // 		throw UnknownEditVariable( variable );
+    pub fn suggest_value(&mut self, variable: &Variable, value: f64) -> SolverResult {
+        // If the edit variable exists update the solver and perform a dual optimize
+        if let Some(mut edit_info) = self.m_edits.get_mut(variable) {
+            self.call_with_dual_guard(|| {
+                let delta = value - edit_info.constant;
+                edit_info.constant = value;
 
-    // 	DualOptimizeGuard guard( *this );
-    // 	EditInfo& info = it->second;
-    // 	double delta = value - info.constant;
-    // 	info.constant = value;
+                // Check first if the positive error variable is basic.
+                if let Some(mut row) = self.m_rows.get_mut(&edit_info.tag.marker) {
+                    if *row.add(-delta) < 0.0 {
+                        self.m_infeasible_rows.push(edit_info.tag.marker.clone());
+                        return;
+                    }
+                }
 
-    // 	// Check first if the positive error variable is basic.
-    // 	RowMap::iterator row_it = m_rows.find( info.tag.marker );
-    // 	if( row_it != m_rows.end() )
-    // 	{
-    // 		if( row_it->second->add( -delta ) < 0.0 )
-    // 			m_infeasible_rows.push_back( row_it->first );
-    // 		return;
-    // 	}
+                // Check next if the negative error variable is basic.
+                if let Some(symbol) = edit_info.tag.other {
+                    if let Some(mut row) = self.m_rows.get_mut(&symbol) {
+                        if *row.add(delta) < 0.0 {
+                            self.m_infeasible_rows.push(edit_info.tag.marker.clone());
+                            return;
+                        }
+                    }
+                }
 
-    // 	// Check next if the negative error variable is basic.
-    // 	row_it = m_rows.find( info.tag.other );
-    // 	if( row_it != m_rows.end() )
-    // 	{
-    // 		if( row_it->second->add( delta ) < 0.0 )
-    // 			m_infeasible_rows.push_back( row_it->first );
-    // 		return;
-    // 	}
+                // Otherwise update each row where the error variables exist.
+                for (symbol, row) in self.m_rows.iter_mut() {
+                    let coeff = row.coefficient_for(&edit_info.tag.marker);
+                    if coeff != 0.0
+                        && *row.add(delta * coeff) < 0.0
+                        && symbol.kind() != SymbolKind::External
+                    {
+                        self.m_infeasible_rows.push(symbol.clone());
+                    }
+                }
+            })
+        } else {
+            Err(KiwiError {
+                err_type: ErrorType::UnknownEditVariable {
+                    variable: variable.clone(),
+                },
+            })
+        }
+    }
 
-    // 	// Otherwise update each row where the error variables exist.
-    // 	RowMap::iterator end = m_rows.end();
-    // 	for( row_it = m_rows.begin(); row_it != end; ++row_it )
-    // 	{
-    // 		double coeff = row_it->second->coefficientFor( info.tag.marker );
-    // 		if( coeff != 0.0 &&
-    // 			row_it->second->add( delta * coeff ) < 0.0 &&
-    // 			row_it->first.type() != Symbol::External )
-    // 			m_infeasible_rows.push_back( row_it->first );
-    // 	}
-    // }
+    /* Update the values of the external solver variables.
 
-    // /* Update the values of the external solver variables.
-
-    // */
-    // void updateVariables()
-    // {
-    // 	typedef RowMap::iterator row_iter_t;
-    // 	typedef VarMap::iterator var_iter_t;
-    // 	row_iter_t row_end = m_rows.end();
-    // 	var_iter_t var_end = m_vars.end();
-    // 	for( var_iter_t var_it = m_vars.begin(); var_it != var_end; ++var_it )
-    // 	{
-    // 		Variable& var( const_cast<Variable&>( var_it->first ) );
-    // 		row_iter_t row_it = m_rows.find( var_it->second );
-    // 		if( row_it == row_end )
-    // 			var.setValue( 0.0 );
-    // 		else
-    // 			var.setValue( row_it->second->constant() );
-    // 	}
-    // }
+    */
+    pub fn update_variable(&mut self) {
+        for (variable, symbol) in self.m_vars.iter_mut() {
+            if let Some(row) = self.m_rows.get(symbol) {
+                variable.set_value(*row.constant());
+            } else {
+                variable.set_value(0.0);
+            }
+        }
+    }
 
     // /* Reset the solver to the empty starting condition.
 
@@ -329,6 +317,7 @@ impl Solver {
     // heap (de)allocations.
 
     // */
+    pub fn reset(&mut self) {}
     // void reset()
     // {
     // 	clearRows();
@@ -341,7 +330,9 @@ impl Solver {
     // 	m_id_tick = 1;
     // }
 
-    // Private functions
+    // =============================================================================================
+    // --- Private methods -------------------------------------------------------------------------
+    // =============================================================================================
 
     /* Create a new Row object for the given constraint.
 
@@ -370,9 +361,9 @@ impl Solver {
         for term in expr.terms().iter() {
             if !near_zero(term.coefficient()) {
                 let symbol = self.get_var_symbol(term.variable());
-                match self.m_rows.get(symbol) {
+                match self.m_rows.get(&symbol) {
                     Some(existing_row) => row.insert_row(existing_row, term.coefficient()),
-                    None => row.insert_symbol(symbol, term.coefficient()),
+                    None => row.insert_symbol(&symbol, term.coefficient()),
                 }
             }
         }
@@ -385,11 +376,11 @@ impl Solver {
         match op {
             RO::GreaterEqual | RO::LessEqual => {
                 let coeff = if op == RO::LessEqual { 1.0 } else { -1.0 };
-                let slack = Symbol::new(SymbolType::Slack, self.next_symbol_id());
+                let slack = Symbol::new(SymbolKind::Slack, self.next_symbol_id());
                 row.insert_symbol(&slack, coeff);
                 tag.marker = slack;
                 if c_strength < strength::REQUIRED {
-                    let error = Symbol::new(SymbolType::Error, self.next_symbol_id());
+                    let error = Symbol::new(SymbolKind::Error, self.next_symbol_id());
                     row.insert_symbol(&error, -coeff);
                     self.m_objective.insert_symbol(&error, c_strength);
                     tag.other = Some(error);
@@ -397,8 +388,8 @@ impl Solver {
             }
             RO::Equal => {
                 if c_strength < strength::REQUIRED {
-                    let errplus = Symbol::new(SymbolType::Error, self.next_symbol_id());
-                    let errminus = Symbol::new(SymbolType::Error, self.next_symbol_id());
+                    let errplus = Symbol::new(SymbolKind::Error, self.next_symbol_id());
+                    let errminus = Symbol::new(SymbolKind::Error, self.next_symbol_id());
                     row.insert_symbol(&errplus, -1.0); // v = eplus - eminus
                     row.insert_symbol(&errminus.clone(), 1.0); // v - eplus + eminus = 0
                     self.m_objective.insert_symbol(&errplus, c_strength);
@@ -406,7 +397,7 @@ impl Solver {
                     tag.marker = errplus;
                     tag.other = Some(errminus);
                 } else {
-                    let dummy = Symbol::new(SymbolType::Dummy, self.next_symbol_id());
+                    let dummy = Symbol::new(SymbolKind::Dummy, self.next_symbol_id());
                     row.insert_symbol(&dummy, 1.0);
                     tag.marker = dummy;
                 }
@@ -419,6 +410,42 @@ impl Solver {
         }
 
         (row, tag)
+    }
+
+    ///
+    fn call_with_dual_guard(&mut self, func: impl FnOnce()) -> SolverResult {
+        func();
+        self.dual_optimize()
+    }
+
+    ///
+    fn dual_optimize(&mut self) -> SolverResult {
+        while !self.m_infeasible_rows.is_empty() {
+            // Get the last infeasible symbol.
+            // Unwrapping is safe since we know that the vector is not empty.
+            let leaving = self.m_infeasible_rows.pop().unwrap();
+            if let Some(row) = self.m_rows.get(&leaving) {
+                if !near_zero(*row.constant()) && *row.constant() < 0.0 {
+                    if let Some(entering) = self.get_dual_entering_symbol(&row) {
+                        // Pivot the entering symbol into the basis
+                        // Unwrapping is safe since we know the symbol is known
+                        // to be in the map, we shadow row since we need an owned
+                        // row not a reference to re-insert it.
+                        let row = self.m_rows.remove(&leaving).unwrap();
+                        row.solve_for_symbols(&leaving, &entering);
+                        self.substitute(&entering, &row);
+                        self.m_rows.insert(entering, row);
+                    } else {
+                        return Err(KiwiError {
+                            err_type: ErrorType::InternalSolverError {
+                                msg: String::from("Dual optimize failed."),
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /* Choose the subject for solving for the row.
@@ -435,43 +462,43 @@ impl Solver {
     If a subject cannot be found, an invalid symbol will be returned.
 
     */
-    fn choose_subject(&self, row: &Row, tag: &Tag) -> &Symbol {
+    fn choose_subject(&self, row: &Row, tag: &Tag) -> Symbol {
         for (symbol, coeff) in row.cells().iter() {
-            if *symbol.r#type() == SymbolType::External {
-                return &symbol.clone();
+            if symbol.kind() == SymbolKind::External {
+                return symbol.clone();
             }
         }
 
-        if *tag.marker.r#type() == SymbolType::Slack
-            || *tag.marker.r#type() == SymbolType::Error && row.coefficient_for(&tag.marker) < 0.0
+        if tag.marker.kind() == SymbolKind::Slack
+            || tag.marker.kind() == SymbolKind::Error && row.coefficient_for(&tag.marker) < 0.0
         {
-            return &tag.marker.clone();
+            return tag.marker.clone();
         }
 
         match tag.other {
-            Some(symbol) => {
-                if *symbol.r#type() == SymbolType::Slack
-                    || *symbol.r#type() == SymbolType::Error && row.coefficient_for(&symbol) < 0.0
+            Some(ref symbol) => {
+                if symbol.kind() == SymbolKind::Slack
+                    || symbol.kind() == SymbolKind::Error && row.coefficient_for(&symbol) < 0.0
                 {
-                    return &symbol;
+                    return symbol.clone();
                 }
             }
             None => (),
         }
-        &Symbol::new(SymbolType::Invalid, 0)
+        Symbol::new(SymbolKind::Invalid, 0)
     }
 
     /// Get the symbol for the given variable.
     ///
     /// If a symbol does not exist for the variable, one will be created.
     ///
-    fn get_var_symbol(&mut self, variable: &Variable) -> &Symbol {
+    fn get_var_symbol(&mut self, variable: &Variable) -> Symbol {
         match self.m_vars.get(variable) {
-            Some(symbol) => symbol,
+            Some(symbol) => *symbol,
             None => {
-                let symbol = Symbol::new(SymbolType::External, self.next_symbol_id());
-                self.m_vars.insert(variable.clone(), symbol);
-                &symbol
+                let symbol = Symbol::new(SymbolKind::External, self.next_symbol_id());
+                self.m_vars.insert(variable.clone(), symbol).clone();
+                symbol
             }
         }
     }
@@ -479,7 +506,7 @@ impl Solver {
     ///
     fn all_dummies(&self, row: &Row) -> bool {
         for (symbol, coeff) in row.cells().iter() {
-            if *symbol.r#type() != SymbolType::Dummy {
+            if symbol.kind() != SymbolKind::Dummy {
                 return false;
             }
         }
@@ -487,9 +514,14 @@ impl Solver {
     }
 
     ///
+    fn clear_rows(&mut self) {
+        self.m_rows.clear();
+    }
+
+    ///
     fn add_with_artificial_variable(&mut self, row: &Row) -> bool {
         // Create and add the artificial variable to the tableau
-        let art = Symbol::new(SymbolType::Slack, self.next_symbol_id());
+        let art = Symbol::new(SymbolKind::Slack, self.next_symbol_id());
         self.m_rows.insert(art.clone(), *row.clone());
         self.m_artificial = Some(*row.clone());
 
@@ -508,7 +540,7 @@ impl Solver {
                 return success;
             }
             let entering = self.any_pivotable_symbol(&art_row);
-            if *entering.r#type() == SymbolType::Invalid {
+            if entering.kind() == SymbolKind::Invalid {
                 return false;
             } // unsatisfiable (will this ever happen?)
             art_row.solve_for_symbols(&art, &entering);
@@ -526,11 +558,11 @@ impl Solver {
 
     ///
     fn remove_constraint_effects(&mut self, constraint: &Constraint, tag: &Tag) {
-        if *tag.marker.r#type() == SymbolType::Error {
+        if tag.marker.kind() == SymbolKind::Error {
             self.remove_marker_effects(&tag.marker, *constraint.strength());
         }
         if let Some(symbol) = tag.other {
-            if *symbol.r#type() == SymbolType::Error {
+            if symbol.kind() == SymbolKind::Error {
                 self.remove_marker_effects(&symbol, *constraint.strength());
             }
         }
@@ -558,7 +590,7 @@ impl Solver {
     fn substitute(&mut self, symbol: &Symbol, row: &Row) {
         for (s, r) in self.m_rows.iter_mut() {
             r.substitute(symbol, row);
-            if *s.r#type() != SymbolType::External && *r.constant() < 0.0 {
+            if s.kind() != SymbolKind::External && *r.constant() < 0.0 {
                 self.m_infeasible_rows.push(s.clone());
             }
         }
@@ -571,7 +603,7 @@ impl Solver {
     fn optimize(&mut self, objective: &Row) -> SolverResult {
         loop {
             let entering = self.get_entering_symbol(objective);
-            if *entering.r#type() == SymbolType::Invalid {
+            if entering.kind() == SymbolKind::Invalid {
                 return Ok(());
             }
             if let Some((leaving_symbol, leaving_row)) = self.get_leaving_row(&entering) {
@@ -598,11 +630,36 @@ impl Solver {
     ///
     fn get_entering_symbol(&self, objective: &Row) -> Symbol {
         for (s, c) in objective.cells().iter() {
-            if *s.r#type() != SymbolType::Dummy && *c < 0.0 {
+            if s.kind() != SymbolKind::Dummy && *c < 0.0 {
                 return s.clone();
             }
         }
-        Symbol::new(SymbolType::Invalid, 0)
+        Symbol::new(SymbolKind::Invalid, 0)
+    }
+
+    /* Compute the entering symbol for the dual optimize operation.
+
+    This method will return the symbol in the row which has a positive
+    coefficient and yields the minimum ratio for its respective symbol
+    in the objective function. The provided row *must* be infeasible.
+    If no symbol is found which meats the criteria, an invalid symbol
+    is returned.
+
+    */
+    fn get_dual_entering_symbol(&self, row: &Row) -> Option<Symbol> {
+        let mut entering = None;
+        let mut ratio = f64::MAX;
+        for (symbol, coeff) in row.cells().iter() {
+            if *coeff > 0.0 && symbol.kind() != SymbolKind::Dummy {
+                let coefficient = self.m_objective.coefficient_for(symbol);
+                let r = coefficient / coeff;
+                if r < ratio {
+                    ratio = r;
+                    entering = Some(symbol.clone());
+                }
+            }
+        }
+        entering
     }
 
     /// Compute the row which holds the exit symbol for a pivot.
@@ -617,7 +674,7 @@ impl Solver {
         let mut ratio = f64::MAX;
         let found: Option<Symbol> = None;
         for (s, r) in self.m_rows.iter() {
-            if *s.r#type() != SymbolType::External {
+            if s.kind() != SymbolKind::External {
                 let temp = r.coefficient_for(entering);
                 if temp < 0.0 {
                     let temp_ratio = -(*r.constant()) / temp;
@@ -667,7 +724,7 @@ impl Solver {
             if c == 0.0 {
                 continue;
             }
-            if *symbol.r#type() == SymbolType::External {
+            if symbol.kind() == SymbolKind::External {
                 third = Some(symbol);
             } else if c < 0.0 {
                 let r = -(*row.constant()) / c;
@@ -704,11 +761,11 @@ impl Solver {
     ///
     fn any_pivotable_symbol(&self, row: &Row) -> Symbol {
         for (s, coeff) in row.cells().iter() {
-            if *s.r#type() == SymbolType::Slack || *s.r#type() == SymbolType::Error {
+            if s.kind() == SymbolKind::Slack || s.kind() == SymbolKind::Error {
                 return s.clone();
             }
         }
-        Symbol::new(SymbolType::Invalid, 0)
+        Symbol::new(SymbolKind::Invalid, 0)
     }
 
     ///
@@ -716,11 +773,5 @@ impl Solver {
     fn next_symbol_id(&mut self) -> u64 {
         self.m_id_tick += 1;
         self.m_id_tick
-    }
-}
-
-impl Drop for Solver {
-    fn drop(&mut self) {
-        self.clear_rows()
     }
 }

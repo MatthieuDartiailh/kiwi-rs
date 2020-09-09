@@ -5,13 +5,16 @@ use std::vec;
 
 // FIXME implement an entry interface similar to HashMap
 // FIXME implement drain
+// FIXME implement Index
+// FIXME Ensure compatibility with HasMap to try and replace one by the other
 
 /// Mapping type relying the ability to sort the keys.
 ///
 /// # Notes
 ///
-/// We do not use the Index, IndexMut traits since using the IndexMut would
+/// We do not use IndexMut traits since using the IndexMut would
 /// require us to be able to create a new V, which we may not know how to do.
+/// The use of Entry API similar to HashMap provide a convenient workaround.
 ///
 /// We also try to stay as close as possible to the API of std::collections::HashMap
 pub struct AssocVec<K, V>

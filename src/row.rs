@@ -35,8 +35,9 @@ impl Row {
         &self.m_constant
     }
 
-    pub fn add(&mut self) {
-        self.m_constant += 1.0
+    pub fn add(&mut self, value: f64) -> &f64 {
+        self.m_constant += value;
+        &self.m_constant
     }
 
     pub fn insert_symbol(&mut self, symbol: &Symbol, coefficient: f64) {

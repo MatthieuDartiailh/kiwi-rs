@@ -3,10 +3,11 @@
 
 use std::cmp;
 
-// XXX swap type for kind to avoid having to escape type everywhere
+// Use an enum wrapped in a struct since we need to compare Symbol of different kind
 
+///
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolType {
+pub enum SymbolKind {
     Invalid,
     External,
     Slack,
@@ -14,15 +15,16 @@ pub enum SymbolType {
     Dummy,
 }
 
+///
 #[derive(Debug, Clone)]
 pub struct Symbol {
     m_id: u64,
-    m_type: SymbolType,
+    m_type: SymbolKind,
 }
 
 impl Symbol {
     ///
-    pub fn new(t: SymbolType, id: u64) -> Symbol {
+    pub fn new(t: SymbolKind, id: u64) -> Symbol {
         Symbol {
             m_id: id,
             m_type: t,
@@ -35,8 +37,8 @@ impl Symbol {
     }
 
     ///
-    pub fn r#type(&self) -> &SymbolType {
-        &self.m_type
+    pub fn kind(&self) -> SymbolKind {
+        self.m_type
     }
 }
 

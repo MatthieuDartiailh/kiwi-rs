@@ -2,8 +2,6 @@
 //!
 //!
 
-use std::cmp;
-
 ///
 #[inline]
 pub fn create(a: f64, b: f64, c: f64, weight: f64) -> f64 {

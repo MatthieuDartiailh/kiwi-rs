@@ -2,7 +2,7 @@
 //!
 //!
 
-// XXX cannot preserve the symbolic for constraints since PartialOrd, PartialEq return
+// NOTE: cannot preserve the symbolic for constraints since PartialOrd, PartialEq return
 // cannot be customized
 use super::constraint::{Constraint, RelationalOperator};
 use super::expression::Expression;
@@ -12,7 +12,7 @@ use super::variable::Variable;
 use std::iter;
 use std::ops;
 
-// XXX The following could be optimized to reduce closing when we get owned value
+// XXX The following could be optimized to reduce cloning when we get owned value
 // as input.
 
 // Variable *, /, - operation
