@@ -1,28 +1,24 @@
-//!
-//!
-//!
-
 use std::cell::{Ref, RefCell};
 use std::cmp;
 use std::hash;
 use std::rc::Rc;
 use std::string::String;
 
-///
+/// Internal data of a variable.
 #[derive(Debug)]
 struct VariableData {
-    name: std::string::String,
+    name: String,
     value: f64,
 }
 
-///
+/// Variable used to define constraints in the solver.
 #[derive(Clone, Debug)]
 pub struct Variable {
     m_variable: Rc<RefCell<VariableData>>,
 }
 
 impl Variable {
-    ///
+    /// Create a new anonymous variable
     pub fn new() -> Variable {
         Variable {
             m_variable: Rc::new(RefCell::new(VariableData {
@@ -32,6 +28,7 @@ impl Variable {
         }
     }
 
+    /// Create a new named variable
     pub fn new_with_name(name: &str) -> Variable {
         Variable {
             m_variable: Rc::new(RefCell::new(VariableData {
@@ -41,18 +38,12 @@ impl Variable {
         }
     }
 
-    fn from(variable: &Variable) -> Variable {
-        Variable {
-            m_variable: variable.m_variable.clone(),
-        }
-    }
-
-    ///
+    /// Access the name of the variable.
     pub fn name(&self) -> Ref<String> {
         Ref::map(self.m_variable.borrow(), |borrow| &borrow.name)
     }
 
-    ///
+    /// Set the name of the variable.
     pub fn set_name(&self, name: &str) -> String {
         let mut borrow = self.m_variable.borrow_mut();
         let old = String::from(&borrow.name);
@@ -60,12 +51,12 @@ impl Variable {
         old
     }
 
-    ///
+    /// Access the current value of the variable.
     pub fn value(&self) -> Ref<f64> {
         Ref::map(self.m_variable.borrow(), |borrow| &borrow.value)
     }
 
-    ///
+    /// Set the value stored in teh variable.
     pub fn set_value(&self, value: f64) -> f64 {
         let mut borrow = self.m_variable.borrow_mut();
         let old = borrow.value;
@@ -125,7 +116,7 @@ mod tests {
     fn test_constructor() {
         let var = Variable::new_with_name("test");
         assert_eq!(*var.name(), "test");
-        let var2 = Variable::from(&var);
+        let var2 = var.clone();
         var.set_name("test2");
         assert_eq!(*var.name(), "test2");
         assert_eq!(*var2.name(), "test2");

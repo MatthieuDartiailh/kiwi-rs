@@ -1,9 +1,8 @@
-//!
-//!
+//! Utility functions.
 
 /// Check if a floating point value is close to zero
 #[inline]
-pub fn near_zero(value: f64) -> bool {
+pub(crate) fn near_zero(value: f64) -> bool {
     let eps = 1.0e-8;
     value.abs() < eps
 }

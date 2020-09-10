@@ -1,4 +1,5 @@
 //! Mapping type based on a vec providing fast iteration
+//! (Inspired by the C++ implementation of Loki::AssocVec)
 use std::iter::FromIterator;
 use std::mem;
 use std::vec;
@@ -127,7 +128,7 @@ where
 
     /// Search for a key
     ///
-    /// If found returns its index ortherwise the index at which to insert it
+    /// If found returns its index ortherwise the index at which to insert a (key, value) pair
     /// to preserve the order
     #[inline]
     fn search(&self, key: &K) -> Result<usize, usize> {
