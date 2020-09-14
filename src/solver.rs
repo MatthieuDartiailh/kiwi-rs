@@ -4,7 +4,7 @@
 //!
 use crate::assoc_vec::AssocVec;
 use crate::constraint::{Constraint, RelationalOperator};
-use crate::errors::{ErrorType, KiwiError};
+use crate::errors::KiwiError;
 use crate::expression::Expression;
 use crate::row::Row;
 use crate::strength;
@@ -58,9 +58,7 @@ impl Solver {
     /// Add a constraint to the solver.
     pub fn add_constraint(&mut self, constraint: Constraint) -> Result<&Tag, KiwiError> {
         if self.m_cns.contains_key(&constraint) {
-            return Err(KiwiError {
-                err_type: ErrorType::DuplicateConstraint { constraint },
-            });
+            return Err(KiwiError::DuplicateConstraint { constraint });
         }
 
         // Creating a row causes symbols to be reserved for the variables
@@ -80,9 +78,7 @@ impl Solver {
         // then it represents an unsatisfiable constraint.
         if subject.kind() == SymbolKind::Invalid && self.all_dummies(&row) {
             if !near_zero(*row.constant()) {
-                return Err(KiwiError {
-                    err_type: ErrorType::UnsatisfiableConstraint { constraint },
-                });
+                return Err(KiwiError::UnsatisfiableConstraint { constraint });
             } else {
                 let subject = &tag.marker;
             }
@@ -93,9 +89,7 @@ impl Solver {
         // the row represents an unsatisfiable constraint.
         if subject.kind() == SymbolKind::Invalid {
             if !self.add_with_artificial_variable(&row) {
-                return Err(KiwiError {
-                    err_type: ErrorType::UnsatisfiableConstraint { constraint },
-                });
+                return Err(KiwiError::UnsatisfiableConstraint { constraint });
             }
         } else {
             row.solve_for(&subject);
@@ -119,10 +113,8 @@ impl Solver {
         match self.m_cns.remove(constraint) {
             Some(t) => tag = t,
             None => {
-                return Err(KiwiError {
-                    err_type: ErrorType::UnknownConstraint {
-                        constraint: constraint.clone(),
-                    },
+                return Err(KiwiError::UnknownConstraint {
+                    constraint: constraint.clone(),
                 });
             }
         }
@@ -142,10 +134,8 @@ impl Solver {
                     self.substitute(&tag.marker, &leaving_row);
                 }
                 None => {
-                    return Err(KiwiError {
-                        err_type: ErrorType::InternalSolverError {
-                            msg: String::from("failed to find leaving row"),
-                        },
+                    return Err(KiwiError::InternalSolverError {
+                        msg: String::from("failed to find leaving row"),
                     })
                 }
             }
@@ -179,17 +169,13 @@ impl Solver {
     */
     pub fn add_edit_variable(&mut self, variable: &Variable, strength: f64) -> SolverResult {
         if self.m_edits.contains_key(variable) {
-            return Err(KiwiError {
-                err_type: ErrorType::DuplicateEditVariable {
-                    variable: variable.clone(),
-                },
+            return Err(KiwiError::DuplicateEditVariable {
+                variable: variable.clone(),
             });
         }
         let c_strength = strength::clip(strength);
         if c_strength == strength::REQUIRED {
-            return Err(KiwiError {
-                err_type: ErrorType::BadRequiredStrength {},
-            });
+            return Err(KiwiError::BadRequiredStrength {});
         }
         let cn = Constraint::new(
             Expression::new(vec![Term::new(variable.clone(), 1.0)], 0.0),
@@ -224,10 +210,8 @@ impl Solver {
             self.m_edits.remove(variable);
             Ok(())
         } else {
-            Err(KiwiError {
-                err_type: ErrorType::UnknownEditVariable {
-                    variable: variable.clone(),
-                },
+            Err(KiwiError::UnknownEditVariable {
+                variable: variable.clone(),
             })
         }
     }
@@ -287,10 +271,8 @@ impl Solver {
                 }
             })
         } else {
-            Err(KiwiError {
-                err_type: ErrorType::UnknownEditVariable {
-                    variable: variable.clone(),
-                },
+            Err(KiwiError::UnknownEditVariable {
+                variable: variable.clone(),
             })
         }
     }
@@ -371,8 +353,8 @@ impl Solver {
         type RO = RelationalOperator;
 
         // Add the necessary slack, error, and dummy variables.
-        let op = *constraint.op();
-        let c_strength = *constraint.strength();
+        let op = constraint.op();
+        let c_strength = constraint.strength();
         match op {
             RO::GreaterEqual | RO::LessEqual => {
                 let coeff = if op == RO::LessEqual { 1.0 } else { -1.0 };
@@ -436,10 +418,8 @@ impl Solver {
                         self.substitute(&entering, &row);
                         self.m_rows.insert(entering, row);
                     } else {
-                        return Err(KiwiError {
-                            err_type: ErrorType::InternalSolverError {
-                                msg: String::from("Dual optimize failed."),
-                            },
+                        return Err(KiwiError::InternalSolverError {
+                            msg: String::from("Dual optimize failed."),
                         });
                     }
                 }
@@ -559,11 +539,11 @@ impl Solver {
     ///
     fn remove_constraint_effects(&mut self, constraint: &Constraint, tag: &Tag) {
         if tag.marker.kind() == SymbolKind::Error {
-            self.remove_marker_effects(&tag.marker, *constraint.strength());
+            self.remove_marker_effects(&tag.marker, constraint.strength());
         }
         if let Some(symbol) = tag.other {
             if symbol.kind() == SymbolKind::Error {
-                self.remove_marker_effects(&symbol, *constraint.strength());
+                self.remove_marker_effects(&symbol, constraint.strength());
             }
         }
     }
@@ -612,10 +592,8 @@ impl Solver {
                 self.substitute(&entering, &leaving_row);
                 self.m_rows.insert(entering.clone(), leaving_row);
             } else {
-                return Err(KiwiError {
-                    err_type: ErrorType::InternalSolverError {
-                        msg: String::from("The objective is unbounded."),
-                    },
+                return Err(KiwiError::InternalSolverError {
+                    msg: String::from("The objective is unbounded."),
                 });
             }
         }
