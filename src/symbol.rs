@@ -1,20 +1,32 @@
-//!
-//!
+//! Symbols are used to represent in a compact and efficient manner the state of teh solver.
 
 use std::cmp;
 
-// Use an enum wrapped in a struct since we need to compare Symbol of different kind
+// We use an enum wrapped in a struct since we need to compare Symbol of different kind
 
-///
+/// Kind of symbol that can exist in the solver.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolKind {
+    /// Invalid symbol are used as place holder when a symbol cannot be found.
     Invalid,
+    /// External symbol ("v"): correspond to a user created variable.
     External,
+    /// Slack symbol ("s"): used to represent inequalities
     Slack,
+    /// Error symbol ("e"): used to represent non-required constraints
     Error,
+    /// Dummy symbol ("d"): always zero, used to keep track of the impact of an
+    /// external variable in the tableau.
     Dummy,
 }
 
+/// Symbol used to represent the state of the solver
+///
+/// # Note
+///
+/// Since solving the system requires a large number of manipulation of the symbols
+/// the operations have to compile down to an efficient representation. In Kiwi, symbols
+/// compile down to u64 meaning that a vector of them fits in a CPU cache line.
 ///
 #[derive(Debug, Clone)]
 pub struct Symbol {
