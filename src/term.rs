@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn test_display() {
         let v = Variable::new_with_name("test");
-        let t = Term::new(v.clone(), 2.0);
+        let t = Term::new(v, 2.0);
         assert_eq!(format!("{}", t), "2.0 * test")
     }
 }

@@ -56,7 +56,7 @@ impl Variable {
         Ref::map(self.m_variable.borrow(), |borrow| &borrow.value)
     }
 
-    /// Set the value stored in teh variable.
+    /// Set the value stored in the variable.
     pub fn set_value(&self, value: f64) -> f64 {
         let mut borrow = self.m_variable.borrow_mut();
         let old = borrow.value;
