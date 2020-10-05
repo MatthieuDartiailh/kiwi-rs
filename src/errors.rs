@@ -5,16 +5,27 @@ use crate::variable::Variable;
 use std::error::Error;
 use std::fmt;
 
-///
-///
 #[derive(Debug)]
 pub enum KiwiError {
+    /// A constraint cannot be satisfied
     UnsatisfiableConstraint { constraint: Constraint },
+
+    /// The constraint has not been added to the solver.
     UnknownConstraint { constraint: Constraint },
+
+    /// The constraint was already added to the solver.
     DuplicateConstraint { constraint: Constraint },
+
+    /// The edit variable has not been added to the solver.
     UnknownEditVariable { variable: Variable },
+
+    /// The edit variable has already been added to the solver.
     DuplicateEditVariable { variable: Variable },
+
+    /// A required strength cannot be used for this operation.
     BadRequiredStrength,
+
+    /// Something went awfully wrong with the solver.
     InternalSolverError { msg: String },
 }
 // Since the errors are well defined, small and do not need to be propagated a lot we use a simple
@@ -52,3 +63,18 @@ impl fmt::Display for KiwiError {
 }
 
 impl Error for KiwiError {}
+
+#[cfg(tests)]
+mod tests {
+
+    #[test]
+    fn test_error_display() {
+        format!("{}", KiwiError::BadRequiredStrength);
+        // XXX to be added once the solver is working !
+        // format!("{}", KiwiError::BadRequiredStrength);
+        // format!("{}", KiwiError::BadRequiredStrength);
+        // format!("{}", KiwiError::BadRequiredStrength);
+        // format!("{}", KiwiError::BadRequiredStrength);
+        // format!("{}", KiwiError::BadRequiredStrength);
+    }
+}
