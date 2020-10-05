@@ -35,7 +35,7 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    ///
+    /// Create a new symbol of a given kind and id.
     pub fn new(t: SymbolKind, id: u64) -> Symbol {
         Symbol {
             m_id: id,
@@ -43,12 +43,12 @@ impl Symbol {
         }
     }
 
-    ///
+    /// Access the symbol id.
     pub fn id(&self) -> &u64 {
         &self.m_id
     }
 
-    ///
+    /// Access the symbol kind.
     pub fn kind(&self) -> SymbolKind {
         self.m_type
     }
@@ -75,4 +75,22 @@ impl cmp::PartialOrd for Symbol {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+
+    use super::{Symbol, SymbolKind};
+
+    #[test]
+    fn test_symbol_creation() {
+        let symbol = Symbol::new(SymbolKind::External, 1);
+        assert_eq!(symbol.kind(), SymbolKind::External);
+        assert_eq!(symbol.id(), &1u64);
+    }
+
+    #[test]
+    fn test_symbol_cmp() {
+        let s1 = Symbol::new(SymbolKind::External, 1);
+        let s2 = Symbol::new(SymbolKind::External, 2);
+        assert_ne!(s1, s2);
+        assert!(s1 < s2);
+    }
+}
