@@ -27,6 +27,12 @@ struct EditInfo {
     constant: f64,
 }
 
+///
+enum OptimizationTarget {
+    Objective,
+    Artificial,
+}
+
 struct Solver {
     m_cns: AssocVec<Constraint, Tag>,
     m_rows: AssocVec<Symbol, Row>,
@@ -56,7 +62,7 @@ impl Solver {
     }
 
     /// Add a constraint to the solver.
-    pub fn add_constraint(&mut self, constraint: Constraint) -> Result<&Tag, KiwiError> {
+    pub fn add_constraint(&mut self, constraint: Constraint) -> Result<Tag, KiwiError> {
         if self.m_cns.contains_key(&constraint) {
             return Err(KiwiError::DuplicateConstraint { constraint });
         }
@@ -67,8 +73,8 @@ impl Solver {
         // Since its likely that those variables will be used in other
         // constraints and since exceptional conditions are uncommon,
         // i'm not too worried about aggressive cleanup of the var map.
-        let (row, tag) = self.create_row(&constraint);
-        let subject = self.choose_subject(&row, &tag);
+        let (mut row, tag) = self.create_row(&constraint);
+        let mut subject = self.choose_subject(&row, &tag);
 
         // If chooseSubject could not find a valid entering symbol, one
         // last option is available if the entire row is composed of
@@ -80,7 +86,7 @@ impl Solver {
             if !near_zero(*row.constant()) {
                 return Err(KiwiError::UnsatisfiableConstraint { constraint });
             } else {
-                let subject = &tag.marker;
+                subject = tag.marker.clone();
             }
         }
 
@@ -88,7 +94,7 @@ impl Solver {
         // be added using an artificial variable. If that fails, then
         // the row represents an unsatisfiable constraint.
         if subject.kind() == SymbolKind::Invalid {
-            if !self.add_with_artificial_variable(&row) {
+            if !self.add_with_artificial_variable(row) {
                 return Err(KiwiError::UnsatisfiableConstraint { constraint });
             }
         } else {
@@ -97,13 +103,13 @@ impl Solver {
             self.m_rows.insert(subject.clone(), row);
         }
 
-        self.m_cns.insert(constraint, tag);
+        self.m_cns.insert(constraint, tag.clone());
 
         // Optimizing after each constraint is added performs less
         // aggregate work due to a smaller average system size. It
         // also ensures the solver remains in a consistent state.
-        self.optimize(&self.m_objective)?;
-        Ok(&tag)
+        self.optimize(OptimizationTarget::Objective)?;
+        Ok(tag)
     }
 
     /// Remove a constraint from the solver.
@@ -126,10 +132,10 @@ impl Solver {
 
         // If the marker is basic, simply drop the row. Otherwise,
         // pivot the marker into the basis and then drop the row.
-        if let Some(row) = self.m_rows.remove(&tag.marker) {
+        if let Some(_row) = self.m_rows.remove(&tag.marker) {
         } else {
             match self.get_marker_leaving_row(&tag.marker) {
-                Some((leaving_symbol, leaving_row)) => {
+                Some((leaving_symbol, mut leaving_row)) => {
                     leaving_row.solve_for_symbols(&leaving_symbol, &tag.marker);
                     self.substitute(&tag.marker, &leaving_row);
                 }
@@ -144,7 +150,7 @@ impl Solver {
         // Optimizing after each constraint is removed ensures that the
         // solver remains consistent. It makes the solver api easier to
         // use at a small tradeoff for speed.
-        self.optimize(&self.m_objective)
+        self.optimize(OptimizationTarget::Objective)
     }
 
     /// Test whether a constraint has been added to the solver.
@@ -205,10 +211,14 @@ impl Solver {
 
     // */
     pub fn remove_edit_variable(&mut self, variable: &Variable) -> SolverResult {
-        if let Some(edit_info) = self.m_edits.get(variable) {
-            self.remove_constraint(&edit_info.constraint)?;
-            self.m_edits.remove(variable);
-            Ok(())
+        if let Some(edit_info) = self.m_edits.remove(variable) {
+            match self.remove_constraint(&edit_info.constraint) {
+                Err(error) => {
+                    self.m_edits.insert(variable.clone(), edit_info);
+                    Err(error)
+                }
+                Ok(()) => Ok(()),
+            }
         } else {
             Err(KiwiError::UnknownEditVariable {
                 variable: variable.clone(),
@@ -236,37 +246,38 @@ impl Solver {
     */
     pub fn suggest_value(&mut self, variable: &Variable, value: f64) -> SolverResult {
         // If the edit variable exists update the solver and perform a dual optimize
-        if let Some(mut edit_info) = self.m_edits.get_mut(variable) {
-            self.call_with_dual_guard(|| {
+        if self.m_edits.contains_key(variable) {
+            self.call_with_dual_guard(|solver| {
+                let mut edit_info = solver.m_edits.get_mut(variable).unwrap();
                 let delta = value - edit_info.constant;
                 edit_info.constant = value;
 
                 // Check first if the positive error variable is basic.
-                if let Some(mut row) = self.m_rows.get_mut(&edit_info.tag.marker) {
+                if let Some(mut row) = solver.m_rows.get_mut(&edit_info.tag.marker) {
                     if *row.add(-delta) < 0.0 {
-                        self.m_infeasible_rows.push(edit_info.tag.marker.clone());
+                        solver.m_infeasible_rows.push(edit_info.tag.marker.clone());
                         return;
                     }
                 }
 
                 // Check next if the negative error variable is basic.
-                if let Some(symbol) = edit_info.tag.other {
-                    if let Some(mut row) = self.m_rows.get_mut(&symbol) {
+                if let Some(symbol) = edit_info.tag.other.as_ref() {
+                    if let Some(row) = solver.m_rows.get_mut(symbol) {
                         if *row.add(delta) < 0.0 {
-                            self.m_infeasible_rows.push(edit_info.tag.marker.clone());
+                            solver.m_infeasible_rows.push(edit_info.tag.marker.clone());
                             return;
                         }
                     }
                 }
 
                 // Otherwise update each row where the error variables exist.
-                for (symbol, row) in self.m_rows.iter_mut() {
+                for (symbol, row) in solver.m_rows.iter_mut() {
                     let coeff = row.coefficient_for(&edit_info.tag.marker);
                     if coeff != 0.0
                         && *row.add(delta * coeff) < 0.0
                         && symbol.kind() != SymbolKind::External
                     {
-                        self.m_infeasible_rows.push(symbol.clone());
+                        solver.m_infeasible_rows.push(symbol.clone());
                     }
                 }
             })
@@ -336,8 +347,8 @@ impl Solver {
     fn create_row(&mut self, constraint: &Constraint) -> (Row, Tag) {
         let expr = constraint.expression();
         let mut row = Row::new(expr.constant());
-        let mut tag: Tag;
-        tag.other = None;
+        let mut marker: Symbol;
+        let mut other: Option<Symbol> = None;
 
         // Substitute the current basic variables into the row.
         for term in expr.terms().iter() {
@@ -360,12 +371,12 @@ impl Solver {
                 let coeff = if op == RO::LessEqual { 1.0 } else { -1.0 };
                 let slack = Symbol::new(SymbolKind::Slack, self.next_symbol_id());
                 row.insert_symbol(&slack, coeff);
-                tag.marker = slack;
+                marker = slack;
                 if c_strength < strength::REQUIRED {
                     let error = Symbol::new(SymbolKind::Error, self.next_symbol_id());
                     row.insert_symbol(&error, -coeff);
                     self.m_objective.insert_symbol(&error, c_strength);
-                    tag.other = Some(error);
+                    other = Some(error);
                 }
             }
             RO::Equal => {
@@ -376,12 +387,12 @@ impl Solver {
                     row.insert_symbol(&errminus.clone(), 1.0); // v - eplus + eminus = 0
                     self.m_objective.insert_symbol(&errplus, c_strength);
                     self.m_objective.insert_symbol(&errminus, c_strength);
-                    tag.marker = errplus;
-                    tag.other = Some(errminus);
+                    marker = errplus;
+                    other = Some(errminus);
                 } else {
                     let dummy = Symbol::new(SymbolKind::Dummy, self.next_symbol_id());
                     row.insert_symbol(&dummy, 1.0);
-                    tag.marker = dummy;
+                    marker = dummy;
                 }
             }
         }
@@ -391,12 +402,12 @@ impl Solver {
             row.reverse_sign();
         }
 
-        (row, tag)
+        (row, Tag { marker, other })
     }
 
     ///
-    fn call_with_dual_guard(&mut self, func: impl FnOnce()) -> SolverResult {
-        func();
+    fn call_with_dual_guard(&mut self, func: impl Fn(&mut Solver)) -> SolverResult {
+        func(self);
         self.dual_optimize()
     }
 
@@ -413,7 +424,7 @@ impl Solver {
                         // Unwrapping is safe since we know the symbol is known
                         // to be in the map, we shadow row since we need an owned
                         // row not a reference to re-insert it.
-                        let row = self.m_rows.remove(&leaving).unwrap();
+                        let mut row = self.m_rows.remove(&leaving).unwrap();
                         row.solve_for_symbols(&leaving, &entering);
                         self.substitute(&entering, &row);
                         self.m_rows.insert(entering, row);
@@ -474,10 +485,10 @@ impl Solver {
     ///
     fn get_var_symbol(&mut self, variable: &Variable) -> Symbol {
         match self.m_vars.get(variable) {
-            Some(symbol) => *symbol,
+            Some(symbol) => symbol.clone(),
             None => {
                 let symbol = Symbol::new(SymbolKind::External, self.next_symbol_id());
-                self.m_vars.insert(variable.clone(), symbol).clone();
+                self.m_vars.insert(variable.clone(), symbol.clone());
                 symbol
             }
         }
@@ -485,7 +496,7 @@ impl Solver {
 
     ///
     fn all_dummies(&self, row: &Row) -> bool {
-        for (symbol, coeff) in row.cells().iter() {
+        for (symbol, _coeff) in row.cells().iter() {
             if symbol.kind() != SymbolKind::Dummy {
                 return false;
             }
@@ -499,23 +510,23 @@ impl Solver {
     }
 
     ///
-    fn add_with_artificial_variable(&mut self, row: &Row) -> bool {
+    fn add_with_artificial_variable(&mut self, row: Row) -> bool {
         // Create and add the artificial variable to the tableau
         let art = Symbol::new(SymbolKind::Slack, self.next_symbol_id());
-        self.m_rows.insert(art.clone(), *row.clone());
-        self.m_artificial = Some(*row.clone());
+        self.m_rows.insert(art.clone(), row.clone());
+        self.m_artificial = Some(row);
 
         // Optimize the artificial objective. This is successful
         // only if the artificial objective is optimized to zero.
         // Using unwrap here is safe since we just set the artificial row
-        self.optimize(&self.m_artificial.unwrap());
-        let success = near_zero(*self.m_artificial.unwrap().constant());
+        self.optimize(OptimizationTarget::Artificial);
+        let success = near_zero(*self.m_artificial.as_ref().unwrap().constant());
         self.m_artificial = None;
 
         // If the artificial variable is not basic, pivot the row so that
         // it becomes basic. If the row is constant, exit early.
-        if let Some(art_row) = self.m_rows.get_mut(&art) {
-            self.m_rows.remove(&art);
+        if self.m_rows.contains_key(&art) {
+            let mut art_row = self.m_rows.remove(&art).unwrap();
             if art_row.cells().is_empty() {
                 return success;
             }
@@ -524,8 +535,8 @@ impl Solver {
                 return false;
             } // unsatisfiable (will this ever happen?)
             art_row.solve_for_symbols(&art, &entering);
-            self.substitute(&entering, art_row);
-            self.m_rows.insert(entering, *art_row);
+            self.substitute(&entering, &art_row);
+            self.m_rows.insert(entering, art_row);
         }
 
         // Remove the artificial variable from the tableau.
@@ -541,9 +552,9 @@ impl Solver {
         if tag.marker.kind() == SymbolKind::Error {
             self.remove_marker_effects(&tag.marker, constraint.strength());
         }
-        if let Some(symbol) = tag.other {
+        if let Some(symbol) = &tag.other {
             if symbol.kind() == SymbolKind::Error {
-                self.remove_marker_effects(&symbol, constraint.strength());
+                self.remove_marker_effects(symbol, constraint.strength());
             }
         }
     }
@@ -580,13 +591,16 @@ impl Solver {
         }
     }
 
-    fn optimize(&mut self, objective: &Row) -> SolverResult {
+    fn optimize(&mut self, target: OptimizationTarget) -> SolverResult {
         loop {
-            let entering = self.get_entering_symbol(objective);
+            let entering = self.get_entering_symbol(match target {
+                OptimizationTarget::Objective => &self.m_objective,
+                OptimizationTarget::Artificial => &self.m_artificial.as_ref().unwrap(),
+            });
             if entering.kind() == SymbolKind::Invalid {
                 return Ok(());
             }
-            if let Some((leaving_symbol, leaving_row)) = self.get_leaving_row(&entering) {
+            if let Some((leaving_symbol, mut leaving_row)) = self.get_leaving_row(&entering) {
                 // pivot the entering symbol into the basis
                 leaving_row.solve_for_symbols(&leaving_symbol, &entering);
                 self.substitute(&entering, &leaving_row);
@@ -650,7 +664,7 @@ impl Solver {
     ///
     fn get_leaving_row(&mut self, entering: &Symbol) -> Option<(Symbol, Row)> {
         let mut ratio = f64::MAX;
-        let found: Option<Symbol> = None;
+        let mut found: Option<Symbol> = None;
         for (s, r) in self.m_rows.iter() {
             if s.kind() != SymbolKind::External {
                 let temp = r.coefficient_for(entering);
@@ -665,7 +679,8 @@ impl Solver {
         }
         if let Some(symbol) = found {
             // Unwrapping is safe since we know the symbol exist in the map.
-            Some((symbol, self.m_rows.remove(&symbol).unwrap()))
+            let row = self.m_rows.remove(&symbol).unwrap();
+            Some((symbol, row))
         } else {
             None
         }
@@ -692,29 +707,29 @@ impl Solver {
 
     */
     fn get_marker_leaving_row(&mut self, marker: &Symbol) -> Option<(Symbol, Row)> {
-        let r1 = f64::MAX;
-        let r2 = f64::MAX;
-        let first: Option<&Symbol> = None;
-        let second: Option<&Symbol> = None;
-        let third: Option<&Symbol> = None;
+        let mut r1 = f64::MAX;
+        let mut r2 = f64::MAX;
+        let mut first: Option<Symbol> = None;
+        let mut second: Option<Symbol> = None;
+        let mut third: Option<Symbol> = None;
         for (symbol, row) in self.m_rows.iter() {
             let c = row.coefficient_for(marker);
             if c == 0.0 {
                 continue;
             }
             if symbol.kind() == SymbolKind::External {
-                third = Some(symbol);
+                third = Some(symbol.clone());
             } else if c < 0.0 {
                 let r = -(*row.constant()) / c;
                 if r < r1 {
                     r1 = r;
-                    first = Some(symbol);
+                    first = Some(symbol.clone());
                 }
             } else {
                 let r = (*row.constant()) / c;
                 if r < r2 {
                     r2 = r;
-                    second = Some(symbol);
+                    second = Some(symbol.clone());
                 }
             }
         }
@@ -722,13 +737,13 @@ impl Solver {
         // If we have a symbol it exists in the mapping so unwraping is safe
         // The following cannot currently use || to reduce the redundancy
         if let Some(leaving) = first {
-            return Some((leaving.clone(), self.m_rows.remove(leaving).unwrap()));
+            return Some((leaving.clone(), self.m_rows.remove(&leaving).unwrap()));
         }
         if let Some(leaving) = second {
-            return Some((leaving.clone(), self.m_rows.remove(leaving).unwrap()));
+            return Some((leaving.clone(), self.m_rows.remove(&leaving).unwrap()));
         }
         if let Some(leaving) = third {
-            return Some((leaving.clone(), self.m_rows.remove(leaving).unwrap()));
+            return Some((leaving.clone(), self.m_rows.remove(&leaving).unwrap()));
         }
         None
     }
@@ -738,7 +753,7 @@ impl Solver {
     /// If no such symbol is present, and Invalid symbol will be returned.
     ///
     fn any_pivotable_symbol(&self, row: &Row) -> Symbol {
-        for (s, coeff) in row.cells().iter() {
+        for (s, _coeff) in row.cells().iter() {
             if s.kind() == SymbolKind::Slack || s.kind() == SymbolKind::Error {
                 return s.clone();
             }

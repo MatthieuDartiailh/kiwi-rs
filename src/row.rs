@@ -6,7 +6,7 @@ use crate::symbol::Symbol;
 use crate::util::near_zero;
 
 // FIXME add comments and tests
-
+#[derive(Clone)]
 pub struct Row {
     m_constant: f64,
     m_cells: AssocVec<Symbol, f64>,
